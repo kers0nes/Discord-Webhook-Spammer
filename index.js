@@ -1,419 +1,177 @@
-const express = require('express');
-const axios = require('axios');
+require('dotenv').config();
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 
-const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
+    ]
+});
 
-const PORT = process.env.PORT || 3000;
+const TOKEN = process.env.TOKEN;
 
-// Compact B&W HTML form with auto-spam
-const HTML_FORM = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>SPAM</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: #000;
-            color: #fff;
-            font-family: 'Courier New', monospace;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .container {
-            background: #0a0a0a;
-            padding: 20px;
-            border: 1px solid #222;
-            width: 380px;
-            max-width: 95%;
-        }
-        h1 {
-            font-size: 16px;
-            font-weight: normal;
-            letter-spacing: 4px;
-            text-align: center;
-            margin-bottom: 15px;
-            color: #fff;
-            border-bottom: 1px solid #222;
-            padding-bottom: 10px;
-        }
-        .field {
-            margin-bottom: 8px;
-        }
-        label {
-            display: block;
-            font-size: 10px;
-            color: #666;
-            margin-bottom: 2px;
-            letter-spacing: 1px;
-        }
-        input, textarea {
-            width: 100%;
-            padding: 6px 8px;
-            background: #000;
-            border: 1px solid #222;
-            color: #fff;
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            outline: none;
-            resize: vertical;
-        }
-        input:focus, textarea:focus {
-            border-color: #fff;
-        }
-        textarea {
-            height: 50px;
-            font-size: 10px;
-        }
-        input::placeholder, textarea::placeholder {
-            color: #333;
-        }
-        .row {
-            display: flex;
-            gap: 8px;
-        }
-        .row .field {
-            flex: 1;
-        }
-        .btn-group {
-            display: flex;
-            gap: 8px;
-            margin-top: 5px;
-        }
-        button {
-            flex: 1;
-            padding: 10px;
-            background: #fff;
-            color: #000;
-            border: none;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            font-weight: bold;
-            letter-spacing: 2px;
-            cursor: pointer;
-            transition: all 0.15s;
-        }
-        button:hover {
-            background: #ddd;
-        }
-        button:active {
-            transform: scale(0.97);
-        }
-        button:disabled {
-            opacity: 0.2;
-            cursor: not-allowed;
-            transform: none;
-        }
-        button.danger {
-            background: #222;
-            color: #fff;
-        }
-        button.danger:hover {
-            background: #333;
-        }
-        #status {
-            margin-top: 10px;
-            padding: 6px;
-            background: #000;
-            border: 1px solid #222;
-            font-size: 10px;
-            color: #555;
-            text-align: center;
-            min-height: 28px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: 'Courier New', monospace;
-            letter-spacing: 0.5px;
-        }
-        #status.active {
-            color: #fff;
-            border-color: #fff;
-        }
-        #status.done {
-            color: #0f0;
-            border-color: #0f0;
-        }
-        #status.error {
-            color: #f00;
-            border-color: #f00;
-        }
-        .badge {
-            font-size: 8px;
-            color: #333;
-            text-align: center;
-            margin-top: 6px;
-            letter-spacing: 1px;
-        }
-        .badge span {
-            color: #fff;
-        }
-        ::-webkit-scrollbar { width: 3px; }
-        ::-webkit-scrollbar-track { background: #000; }
-        ::-webkit-scrollbar-thumb { background: #222; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>⏣ SPAM</h1>
-        
-        <div class="field">
-            <label>WEBHOOK</label>
-            <input type="text" id="webhook" placeholder="https://discord.com/api/webhooks/..." value="">
-        </div>
-        
-        <div class="field">
-            <label>MESSAGES (one per line)</label>
-            <textarea id="messages" placeholder="SPAM&#10;SPAM SPAM&#10;🔥">SPAM
-SPAM SPAM
-🔥</textarea>
-        </div>
-        
-        <div class="row">
-            <div class="field">
-                <label>DELAY (MS)</label>
-                <input type="number" id="delay" value="200" min="50" max="5000">
-            </div>
-            <div class="field">
-                <label>COUNT</label>
-                <input type="number" id="count" value="1000" min="1" max="10000">
-            </div>
-        </div>
-        
-        <div class="btn-group">
-            <button id="spamBtn">▶ AUTO</button>
-            <button id="stopBtn" class="danger" disabled>■ STOP</button>
-        </div>
-        
-        <div id="status">ready</div>
-        <div class="badge">⚡ <span>AUTO</span> · 1000 MSGS</div>
-    </div>
+// Spam settings
+const SPAM_MESSAGES = [
+    'SPAM SPAM SPAM',
+    '🔥🔥🔥',
+    'DISCORD BOT SPAM',
+    '💀💀💀',
+    'RIP NOTIFICATIONS',
+    'SPAMMMMMM!',
+    '🤖 BOT SPAM',
+    '💥💥💥'
+];
 
-    <script>
-        const webhookInput = document.getElementById('webhook');
-        const messagesInput = document.getElementById('messages');
-        const delayInput = document.getElementById('delay');
-        const countInput = document.getElementById('count');
-        const spamBtn = document.getElementById('spamBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const status = document.getElementById('status');
+// Store active spams
+const activeSpams = new Map();
+
+client.once('ready', () => {
+    console.log(`✅ ${client.user.tag} is online!`);
+    console.log(`📝 Spam commands: !spam, !stopspam, !help`);
+});
+
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+
+    const args = message.content.split(' ');
+    const command = args[0].toLowerCase();
+
+    // !help command
+    if (command === '!help') {
+        const embed = new EmbedBuilder()
+            .setColor(0x000000)
+            .setTitle('🖤 SPAM BOT COMMANDS')
+            .setDescription('Black & White Edition')
+            .addFields(
+                { name: '!spam [count]', value: 'Spam messages in the channel\nDefault: 50, Max: 1000', inline: false },
+                { name: '!spamhere [count]', value: 'Spam in current channel', inline: false },
+                { name: '!stopspam', value: 'Stop all spam', inline: false },
+                { name: '!status', value: 'Check spam status', inline: false },
+                { name: '!help', value: 'Show this menu', inline: false }
+            )
+            .setFooter({ text: '⚡ SPAM BOT' })
+            .setTimestamp();
+
+        return message.reply({ embeds: [embed] });
+    }
+
+    // !spam command
+    if (command === '!spam' || command === '!spamhere') {
+        const count = parseInt(args[1]) || 50;
         
-        let isSpamming = false;
-        let shouldStop = false;
-        
-        // Auto-fill webhook from URL
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('webhook')) {
-            webhookInput.value = params.get('webhook');
+        if (count < 1 || count > 1000) {
+            return message.reply('❌ Count must be between 1 and 1000');
         }
+
+        const channel = message.channel;
+        const guildId = message.guild.id;
         
-        async function startSpam() {
-            if (isSpamming) return;
-            
-            const webhook = webhookInput.value.trim();
-            const messages = messagesInput.value.split('\\n').filter(m => m.trim());
-            const delay = parseInt(delayInput.value) || 200;
-            const count = parseInt(countInput.value) || 1000;
-            
-            if (!webhook || !webhook.startsWith('https://discord.com/api/webhooks/')) {
-                status.textContent = '❌ INVALID WEBHOOK';
-                status.className = 'error';
-                return;
+        // Check if already spamming
+        if (activeSpams.has(guildId)) {
+            return message.reply('⚠️ Already spamming! Use !stopspam first.');
+        }
+
+        // Send initial message
+        const reply = await message.reply(`🚀 **SPAMMING ${count} MESSAGES!**\nType \`!stopspam\` to stop.`);
+        
+        let sent = 0;
+        let failed = 0;
+        let isActive = true;
+
+        // Store spam state
+        activeSpams.set(guildId, { 
+            active: true, 
+            count: count,
+            sent: 0,
+            failed: 0
+        });
+
+        // Spam loop
+        for (let i = 0; i < count; i++) {
+            // Check if stopped
+            if (!activeSpams.get(guildId)?.active) {
+                isActive = false;
+                break;
             }
+
+            const msg = SPAM_MESSAGES[Math.floor(Math.random() * SPAM_MESSAGES.length)];
             
-            if (messages.length === 0) {
-                status.textContent = '❌ NO MESSAGES';
-                status.className = 'error';
-                return;
-            }
-            
-            isSpamming = true;
-            shouldStop = false;
-            spamBtn.disabled = true;
-            stopBtn.disabled = false;
-            spamBtn.textContent = '⏳ SPAMMING';
-            status.textContent = \`🚀 SENDING \${count} MESSAGES...\`;
-            status.className = 'active';
-            
-            let sent = 0;
-            let failed = 0;
-            let totalMessages = Math.min(count, 10000);
-            
-            for (let i = 0; i < totalMessages; i++) {
-                if (shouldStop) {
-                    status.textContent = \`⏹ STOPPED · \${sent} SENT · \${failed} FAILED\`;
-                    status.className = '';
-                    break;
+            try {
+                await channel.send(`${msg} #${i + 1}`);
+                sent++;
+                activeSpams.get(guildId).sent = sent;
+            } catch (error) {
+                failed++;
+                activeSpams.get(guildId).failed = failed;
+                
+                // Rate limit handling
+                if (error.code === 429) {
+                    const wait = error.retryAfter || 2000;
+                    await new Promise(resolve => setTimeout(resolve, wait));
+                    i--; // Retry
+                    continue;
                 }
-                
-                const msg = messages[Math.floor(Math.random() * messages.length)];
-                
+            }
+
+            // Update status every 10 messages
+            if (i % 10 === 0 || i === count - 1) {
                 try {
-                    const response = await fetch('/api/spam', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            webhook: webhook,
-                            messages: [msg],
-                            delay: 0
-                        })
-                    });
-                    
-                    const data = await response.json();
-                    if (data.sent > 0) {
-                        sent++;
-                    } else {
-                        failed++;
-                    }
-                } catch (err) {
-                    failed++;
-                }
-                
-                // Update status every 10 messages
-                if (i % 10 === 0 || i === totalMessages - 1) {
-                    status.textContent = \`📨 \${sent}/\${totalMessages} SENT · ❌ \${failed} FAILED\`;
-                }
-                
-                // Delay between messages
-                if (i < totalMessages - 1 && !shouldStop) {
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
+                    await reply.edit(`🚀 **SPAMMING ${count} MESSAGES!**\n📨 Sent: ${sent}/${count} | ❌ Failed: ${failed}\nType \`!stopspam\` to stop.`);
+                } catch (e) {}
             }
-            
-            if (!shouldStop) {
-                status.textContent = \`✅ DONE! \${sent} SENT · \${failed} FAILED\`;
-                status.className = 'done';
-            }
-            
-            isSpamming = false;
-            spamBtn.disabled = false;
-            stopBtn.disabled = true;
-            spamBtn.textContent = '▶ AUTO';
-        }
-        
-        function stopSpam() {
-            if (isSpamming) {
-                shouldStop = true;
-                status.textContent = '⏹ STOPPING...';
-                stopBtn.disabled = true;
-            }
-        }
-        
-        spamBtn.addEventListener('click', startSpam);
-        stopBtn.addEventListener('click', stopSpam);
-        
-        // Auto-start with webhook param
-        if (params.get('webhook')) {
-            setTimeout(startSpam, 500);
-        }
-        
-        // Enter key support
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !isSpamming && e.target.tagName !== 'TEXTAREA') {
-                startSpam();
-            }
-        });
-    </script>
-</body>
-</html>
-`;
 
-// Spam function
-async function spamWebhook(webhookUrl, messages, delayMs = 1000) {
-    const results = [];
-    
-    for (let i = 0; i < messages.length; i++) {
-        try {
-            const payload = {
-                content: messages[i],
-                allowed_mentions: { parse: [] }
-            };
-            
-            const response = await axios.post(webhookUrl, payload, {
-                headers: { 'Content-Type': 'application/json' }
-            });
-            
-            results.push({ 
-                message: messages[i], 
-                success: true, 
-                status: response.status 
-            });
-            
-        } catch (error) {
-            if (error.response?.status === 429) {
-                const retryAfter = error.response.data.retry_after || 5;
-                results.push({ 
-                    message: messages[i], 
-                    success: false, 
-                    error: \`Rate limited, wait \${retryAfter}s\` 
-                });
-                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-            } else {
-                results.push({ 
-                    message: messages[i], 
-                    success: false, 
-                    error: error.message 
-                });
+            // Delay between messages (100ms)
+            if (i < count - 1 && isActive) {
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
-        
-        // Wait between messages
-        if (i < messages.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, delayMs));
+
+        // Clean up
+        activeSpams.delete(guildId);
+
+        if (isActive) {
+            await reply.edit(`✅ **SPAM COMPLETE!**\n📨 Sent: ${sent}/${count} | ❌ Failed: ${failed}`);
+        } else {
+            await reply.edit(`⏹ **SPAM STOPPED!**\n📨 Sent: ${sent}/${count} | ❌ Failed: ${failed}`);
         }
     }
-    
-    return results;
-}
 
-// Endpoints
-app.get('/', (req, res) => {
-    res.send(HTML_FORM);
+    // !stopspam command
+    if (command === '!stopspam') {
+        const guildId = message.guild.id;
+        
+        if (!activeSpams.has(guildId)) {
+            return message.reply('ℹ️ No active spam to stop.');
+        }
+
+        const spam = activeSpams.get(guildId);
+        spam.active = false;
+        
+        message.reply(`⏹ **STOPPING SPAM...**\n📨 Sent: ${spam.sent}/${spam.count} | ❌ Failed: ${spam.failed}`);
+    }
+
+    // !status command
+    if (command === '!status') {
+        const guildId = message.guild.id;
+        
+        if (!activeSpams.has(guildId)) {
+            return message.reply('ℹ️ No active spam.');
+        }
+
+        const spam = activeSpams.get(guildId);
+        message.reply(`📊 **SPAM STATUS**\n📨 Sent: ${spam.sent}/${spam.count}\n❌ Failed: ${spam.failed}\n⚡ Active: ${spam.active}`);
+    }
 });
 
-app.post('/api/spam', async (req, res) => {
-    const { webhook, messages, delay } = req.body;
-    
-    if (!webhook || !webhook.startsWith('https://discord.com/api/webhooks/')) {
-        return res.status(400).json({ 
-            error: 'Invalid webhook URL' 
-        });
-    }
-    
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-        return res.status(400).json({ error: 'No messages provided' });
-    }
-    
-    if (messages.length > 100) {
-        return res.status(400).json({ error: 'Maximum 100 messages per request' });
-    }
-    
-    const delayMs = delay || 1000;
-    
-    console.log(\`📨 Spamming \${messages.length} messages\`);
-    
-    const results = await spamWebhook(webhook, messages, delayMs);
-    const successCount = results.filter(r => r.success).length;
-    const failCount = results.filter(r => !r.success).length;
-    
-    res.json({
-        success: successCount > 0,
-        total: results.length,
-        sent: successCount,
-        failed: failCount,
-        results: results
-    });
+// Error handling
+client.on('error', (error) => {
+    console.error('❌ Client error:', error);
 });
 
-app.get('/health', (req, res) => {
-    res.json({ status: 'alive', uptime: process.uptime() });
-});
-
-app.listen(PORT, () => {
-    console.log(\`🚀 Spam bot running on http://localhost:\${PORT}\`);
-    console.log('📝 Auto-spam 1000 messages with one click!');
+// Login
+client.login(TOKEN).catch(error => {
+    console.error('❌ Failed to login:', error);
 });
