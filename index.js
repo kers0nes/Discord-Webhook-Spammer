@@ -1,293 +1,164 @@
+const express = require('express');
 const axios = require('axios');
-const chalk = require('chalk');
-const readline = require('readline');
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-class WebhookSpammer {
-    constructor(webhookUrl) {
-        this.webhookUrl = webhookUrl;
-        this.running = false;
-        this.intervals = [];
-        this.sentCount = 0;
-        this.failedCount = 0;
-    }
+const PORT = process.env.PORT || 3000;
 
-    async sendMessage(content, username = null, avatarUrl = null, embeds = null) {
-        const payload = { content };
-        if (username) payload.username = username;
-        if (avatarUrl) payload.avatar_url = avatarUrl;
-        if (embeds) payload.embeds = embeds;
+// HTML form for easy testing
+const HTML_FORM = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spam Bot</title>
+    <style>
+        body { font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }
+        input, textarea { width: 100%; padding: 10px; margin: 10px 0; }
+        button { padding: 10px 20px; background: #5865F2; color: white; border: none; cursor: pointer; }
+        .result { margin-top: 20px; padding: 10px; background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>🔥 Discord Spam Bot</h1>
+    <p>Enter any webhook URL and spam away!</p>
+    
+    <form id="spamForm">
+        <input type="text" id="webhook" placeholder="Webhook URL" required>
+        <textarea id="messages" rows="5" placeholder="Messages (one per line)" required></textarea>
+        <input type="number" id="delay" placeholder="Delay (ms)" value="1000">
+        <button type="submit">🚀 SPAM!</button>
+    </form>
+    
+    <div id="result" class="result"></div>
 
+    <script>
+        document.getElementById('spamForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const result = document.getElementById('result');
+            result.innerHTML = 'Sending...';
+            
+            const webhook = document.getElementById('webhook').value;
+            const messages = document.getElementById('messages').value.split('\\n').filter(m => m.trim());
+            const delay = parseInt(document.getElementById('delay').value) || 1000;
+            
+            try {
+                const response = await fetch('/api/spam', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ webhook, messages, delay })
+                });
+                const data = await response.json();
+                result.innerHTML = JSON.stringify(data, null, 2);
+            } catch (error) {
+                result.innerHTML = 'Error: ' + error.message;
+            }
+        };
+    </script>
+</body>
+</html>
+`;
+
+// Spam function
+async function spamWebhook(webhookUrl, messages, delayMs = 1000) {
+    const results = [];
+    
+    for (let i = 0; i < messages.length; i++) {
         try {
-            const response = await axios.post(this.webhookUrl, payload, {
+            const payload = {
+                content: messages[i],
+                allowed_mentions: { parse: [] }
+            };
+            
+            const response = await axios.post(webhookUrl, payload, {
                 headers: { 'Content-Type': 'application/json' }
             });
-            return { success: true, status: response.status };
-        } catch (error) {
-            const status = error.response?.status || 500;
-            const message = error.response?.data?.message || error.message;
-            return { success: false, status, message };
-        }
-    }
-
-    async startSpam(config) {
-        const {
-            threads = 5,
-            totalMessages = 100,
-            delay = 100,
-            message = 'Spam #{count}',
-            username = null,
-            avatarUrl = null,
-            embeds = null,
-            randomDelay = false,
-            proxyList = []
-        } = config;
-
-        this.running = true;
-        this.sentCount = 0;
-        this.failedCount = 0;
-        
-        const messagesPerThread = Math.ceil(totalMessages / threads);
-        let completedThreads = 0;
-
-        console.log(chalk.cyan(`
-╔══════════════════════════════════════════════╗
-║     DISCORD WEBHOOK SPAMMER v2.0            ║
-╠══════════════════════════════════════════════╣
-║ Threads: ${threads}                              ║
-║ Total Messages: ${totalMessages}                   ║
-║ Delay: ${delay}ms                               ║
-║ Random Delay: ${randomDelay ? 'Yes' : 'No'}                  ║
-╚══════════════════════════════════════════════╝
-        `));
-
-        for (let t = 0; t < threads; t++) {
-            const interval = setInterval(async () => {
-                if (!this.running) {
-                    clearInterval(interval);
-                    return;
-                }
-
-                if (this.sentCount >= totalMessages) {
-                    clearInterval(interval);
-                    completedThreads++;
-                    if (completedThreads === threads) {
-                        this.printStats();
-                    }
-                    return;
-                }
-
-                this.sentCount++;
-                const msg = message.replace(/\{count\}/g, this.sentCount);
-                
-                // Random delay if enabled
-                const currentDelay = randomDelay ? 
-                    Math.floor(Math.random() * delay * 2) + 50 : 
-                    delay;
-
-                const result = await this.sendMessage(
-                    msg, 
-                    username, 
-                    avatarUrl,
-                    embeds
-                );
-
-                if (result.success) {
-                    process.stdout.write(chalk.green(`✓ ${this.sentCount} `));
-                } else {
-                    this.failedCount++;
-                    process.stdout.write(chalk.red(`✗ ${this.sentCount} `));
-                }
-
-                // Rate limit handling
-                if (result.status === 429) {
-                    console.log(chalk.yellow(`\n⏳ Rate limited, waiting...`));
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                }
-
-                await new Promise(resolve => setTimeout(resolve, currentDelay));
-
-            }, 100);
             
-            this.intervals.push(interval);
-        }
-    }
-
-    printStats() {
-        console.log(chalk.cyan(`
-╔══════════════════════════════════════════════╗
-║              SPAM COMPLETE                  ║
-╠══════════════════════════════════════════════╣
-║ Sent: ${chalk.green(this.sentCount)}                              ║
-║ Failed: ${chalk.red(this.failedCount)}                            ║
-║ Total: ${chalk.yellow(this.sentCount + this.failedCount)}                         ║
-╚══════════════════════════════════════════════╝
-        `));
-    }
-
-    stopSpam() {
-        this.running = false;
-        this.intervals.forEach(clearInterval);
-        this.intervals = [];
-        console.log(chalk.red('\n⛔ Spam stopped!'));
-        this.printStats();
-    }
-
-    async testWebhook() {
-        console.log(chalk.yellow('🔍 Testing webhook...'));
-        const result = await this.sendMessage('🔧 Webhook test message');
-        if (result.success) {
-            console.log(chalk.green('✅ Webhook is working!'));
-            return true;
-        } else {
-            console.log(chalk.red(`❌ Webhook failed: ${result.message}`));
-            return false;
-        }
-    }
-}
-
-// Advanced Spammer with Embeds
-async function createEmbed(title, description, color = 0x00ff00, fields = []) {
-    return [{
-        title,
-        description,
-        color,
-        fields,
-        timestamp: new Date().toISOString(),
-        footer: { text: 'Webhook Spammer' }
-    }];
-}
-
-// CLI Interface
-async function main() {
-    console.log(chalk.magenta(`
-    ╔══════════════════════════════════════════════════════════╗
-    ║                                                          ║
-    ║     🚀 DISCORD WEBHOOK SPAMMER v2.0 - NODE.JS          ║
-    ║                                                          ║
-    ║     ⚠️  For educational/testing purposes only           ║
-    ║                                                          ║
-    ╚══════════════════════════════════════════════════════════╝
-    `));
-
-    const webhookUrl = await new Promise(resolve => 
-        rl.question(chalk.cyan('📌 Enter webhook URL: '), resolve)
-    );
-
-    const spammer = new WebhookSpammer(webhookUrl);
-
-    // Test webhook
-    const working = await spammer.testWebhook();
-    if (!working) {
-        console.log(chalk.red('❌ Invalid webhook URL!'));
-        rl.close();
-        return;
-    }
-
-    while (true) {
-        console.log(chalk.cyan(`
-    ┌─────────────────────────────────────────┐
-    │  1. 🚀 Start Simple Spam               │
-    │  2. 🎨 Start Spam with Embeds          │
-    │  3. ⏹️  Stop Spam                      │
-    │  4. 📊 Show Stats                      │
-    │  5. 🧹 Clear Console                   │
-    │  6. 🚪 Exit                           │
-    └─────────────────────────────────────────┘
-        `));
-
-        const choice = await new Promise(resolve => 
-            rl.question(chalk.yellow('👉 Select option: '), resolve)
-        );
-
-        switch (choice) {
-            case '1': {
-                const total = await new Promise(resolve => 
-                    rl.question('📊 Total messages: ', resolve)
-                );
-                const threads = await new Promise(resolve => 
-                    rl.question('🧵 Threads (1-20): ', resolve)
-                );
-                const delay = await new Promise(resolve => 
-                    rl.question('⏱️  Delay (ms): ', resolve)
-                );
-                const message = await new Promise(resolve => 
-                    rl.question('💬 Message (use {count} for number): ', resolve)
-                );
-                const username = await new Promise(resolve => 
-                    rl.question('👤 Bot name (optional): ', resolve)
-                );
-
-                await spammer.startSpam({
-                    totalMessages: parseInt(total) || 100,
-                    threads: Math.min(parseInt(threads) || 5, 20),
-                    delay: parseInt(delay) || 100,
-                    message: message || 'Spam #{count}',
-                    username: username || null,
-                    randomDelay: false
+            results.push({ 
+                message: messages[i], 
+                success: true, 
+                status: response.status 
+            });
+            
+        } catch (error) {
+            if (error.response?.status === 429) {
+                const retryAfter = error.response.data.retry_after || 5;
+                results.push({ 
+                    message: messages[i], 
+                    success: false, 
+                    error: `Rate limited, wait ${retryAfter}s` 
                 });
-                break;
-            }
-
-            case '2': {
-                const total = await new Promise(resolve => 
-                    rl.question('📊 Total messages: ', resolve)
-                );
-                const title = await new Promise(resolve => 
-                    rl.question('📝 Embed title: ', resolve)
-                );
-                const description = await new Promise(resolve => 
-                    rl.question('📄 Embed description: ', resolve)
-                );
-                
-                const embeds = await createEmbed(
-                    title || 'Spam Embed',
-                    description || 'This is spam!'
-                );
-
-                await spammer.startSpam({
-                    totalMessages: parseInt(total) || 50,
-                    threads: 3,
-                    delay: 200,
-                    message: '',
-                    embeds: embeds,
-                    username: 'Embed Spammer'
+                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+            } else {
+                results.push({ 
+                    message: messages[i], 
+                    success: false, 
+                    error: error.message 
                 });
-                break;
             }
-
-            case '3':
-                spammer.stopSpam();
-                break;
-
-            case '4':
-                spammer.printStats();
-                break;
-
-            case '5':
-                console.clear();
-                break;
-
-            case '6':
-                spammer.stopSpam();
-                console.log(chalk.magenta('👋 Goodbye!'));
-                rl.close();
-                return;
-
-            default:
-                console.log(chalk.red('❌ Invalid option!'));
+        }
+        
+        // Wait between messages
+        if (i < messages.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
         }
     }
+    
+    return results;
 }
 
-// Handle Ctrl+C
-process.on('SIGINT', () => {
-    console.log(chalk.yellow('\n⚠️  Interrupted by user'));
-    process.exit(0);
+// ---------- ENDPOINTS ----------
+
+// Homepage with form
+app.get('/', (req, res) => {
+    res.send(HTML_FORM);
 });
 
-main().catch(console.error);
+// API endpoint - anyone can use
+app.post('/api/spam', async (req, res) => {
+    const { webhook, messages, delay } = req.body;
+    
+    // Validate
+    if (!webhook || !webhook.startsWith('https://discord.com/api/webhooks/')) {
+        return res.status(400).json({ 
+            error: 'Invalid webhook URL. Must start with https://discord.com/api/webhooks/' 
+        });
+    }
+    
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: 'No messages provided' });
+    }
+    
+    if (messages.length > 100) {
+        return res.status(400).json({ error: 'Maximum 100 messages per request' });
+    }
+    
+    const delayMs = delay || 1000;
+    
+    console.log(`📨 Spamming ${messages.length} messages to webhook`);
+    
+    const results = await spamWebhook(webhook, messages, delayMs);
+    
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+    
+    res.json({
+        success: successCount > 0,
+        total: results.length,
+        sent: successCount,
+        failed: failCount,
+        results: results
+    });
+});
+
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ status: 'alive', uptime: process.uptime() });
+});
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`🚀 Spam bot running on http://localhost:${PORT}`);
+    console.log(`📝 Anyone can use it at /api/spam`);
+});
